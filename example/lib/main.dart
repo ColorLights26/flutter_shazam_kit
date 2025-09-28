@@ -83,7 +83,7 @@ class _MyAppState extends State<MyApp> {
             children: [
               Text(_state == DetectState.none ? "Start Detect" : "End Detect",
                   style:
-                      theme.textTheme.headline6?.copyWith(color: Colors.white)),
+                      theme.textTheme.titleLarge?.copyWith(color: Colors.white)),
               if (_state == DetectState.detecting) ...[
                 const SizedBox(width: 10),
                 const SizedBox(
@@ -140,13 +140,13 @@ class _MyAppState extends State<MyApp> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(item.title,
-                            style: theme.textTheme.subtitle1
+                            style: theme.textTheme.titleMedium
                                 ?.copyWith(fontWeight: FontWeight.bold)),
                         Text("Artist: ${item.artist}",
-                            style: theme.textTheme.subtitle2
+                            style: theme.textTheme.titleSmall
                                 ?.copyWith(fontWeight: FontWeight.bold)),
                         Text("Genres: ${item.genres.join(", ")}",
-                            style: theme.textTheme.subtitle2
+                            style: theme.textTheme.titleSmall
                                 ?.copyWith(fontWeight: FontWeight.bold))
                       ],
                     ),
