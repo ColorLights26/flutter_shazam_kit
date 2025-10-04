@@ -49,6 +49,12 @@ android {
     defaultConfig {
         minSdkVersion 23
     }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
 }
 
 dependencies {
