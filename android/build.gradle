@@ -19,8 +19,10 @@ rootProject.allprojects {
     repositories {
         google()
         mavenCentral()
+
+        // Recognize AAR files in the plugin's libs folder
         flatDir {
-            dirs 'libs'
+            dirs project(':flutter_shazam_kit').file('libs')
         }
     }
 }
@@ -42,27 +44,36 @@ android {
         jvmTarget = '11'
     }
 
-    sourceSets {
-        main.java.srcDirs += 'src/main/kotlin'
+    defaultConfig {
+        minSdkVersion 23  // ShazamKit requirement
+        consumerProguardFiles 'proguard-rules.pro'
     }
 
-    defaultConfig {
-        minSdkVersion 23
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
     }
 
     packaging {
         jniLibs {
-            useLegacyPackaging = false
+            // Prefer libc++_shared.so from ShazamKit AAR to avoid version conflicts
+            excludes += "**/libc++_shared.so"
         }
     }
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
-    implementation(name: "shazamkit-android-release", ext: "aar")
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.1'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.1'
-    implementation 'com.squareup.okhttp3:okhttp:4.9.0'
+    // Kotlin standard library
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:${kotlin_version}"
+
+    // ShazamKit AAR
+    api(name: 'shazamkit-android-release', ext: 'aar')
+
+    // ShazamKit required dependencies
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'com.squareup.retrofit2:retrofit:2.9.0'
     implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
 }
