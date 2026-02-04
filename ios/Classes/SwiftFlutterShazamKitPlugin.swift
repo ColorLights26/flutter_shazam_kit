@@ -24,16 +24,7 @@ public class SwiftFlutterShazamKitPlugin: NSObject, FlutterPlugin {
             configureShazamKitSession()
             result(nil)
         case "startDetectionWithMicrophone":
-            do{
-                let category = AVAudioSession.sharedInstance().category
-                if (category != .playAndRecord) {
-                    try AVAudioSession.sharedInstance().setCategory(.playAndRecord)
-                }
-                configureAudio()
-                try startListening(result: result)
-            }catch{
-                callbackChannel?.invokeMethod("didHasError", arguments: error.localizedDescription)
-            }
+            startDetection(result: result)
         case "endDetectionWithMicrophone":
             stopListening()
             result(nil)
@@ -61,54 +52,69 @@ extension SwiftFlutterShazamKitPlugin{
         session?.matchStreamingBuffer(buffer, at: audioTime)
     }
     
-    func configureAudio(){
-        let inputFormat = audioEngine.inputNode.inputFormat(forBus: 0)
-        
-        // Set an output format compatible with ShazamKit.
-        let outputFormat = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)
-        
-        // Create a mixer node to convert the input.
-        audioEngine.attach(mixerNode)
-        
-        // Attach the mixer to the microphone input and the output of the audio engine.
-        audioEngine.connect(audioEngine.inputNode, to: mixerNode, format: inputFormat)
-        audioEngine.connect(mixerNode, to: audioEngine.outputNode, format: outputFormat)
-        
-        // Install a tap on the mixer node to capture the microphone audio.
-        mixerNode.installTap(onBus: 0,
-                             bufferSize: 8192,
-                             format: outputFormat) { buffer, audioTime in
-            // Add captured audio to the buffer used for making a match.
-            self.addAudio(buffer: buffer, audioTime: audioTime)
-        }
-    }
-    
-    func startListening(result: FlutterResult) throws {
-        guard session != nil else{
+    func startDetection(result: @escaping FlutterResult) {
+        guard session != nil else {
             callbackChannel?.invokeMethod("didHasError", arguments: "ShazamSession not found, please call configureShazamKitSession() first to initialize it.")
             result(nil)
             return
         }
-        callbackChannel?.invokeMethod("detectStateChanged", arguments: 1)
-        // Throw an error if the audio engine is already running.
         guard !audioEngine.isRunning else {
             callbackChannel?.invokeMethod("didHasError", arguments: "Audio engine is currently running, please stop the audio engine first and then try again")
+            result(nil)
             return
         }
+
         let audioSession = AVAudioSession.sharedInstance()
-        
-        // Ask the user for permission to use the mic if required then start the engine.
-        try audioSession.setCategory(.playAndRecord)
-        audioSession.requestRecordPermission { [weak self] success in
+
+        // 1. playAndRecord allows other app audio to keep playing.
+        //    .mixWithOthers prevents interrupting other audio sources.
+        //    Feedback is prevented by muting mainMixerNode.outputVolume = 0 below.
+        do {
+            try audioSession.setCategory(.playAndRecord, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+            try audioSession.setActive(true, options: [])
+        } catch {
+            callbackChannel?.invokeMethod("didHasError", arguments: error.localizedDescription)
+            result(nil)
+            return
+        }
+
+        // 2. Request mic permission, THEN configure audio + start engine
+        audioSession.requestRecordPermission { [weak self] granted in
             DispatchQueue.main.async {
-                guard success else {
-                    self?.callbackChannel?.invokeMethod("didHasError", arguments: "Recording permission not found, please allow permission first and then try again")
+                guard let self = self else { return }
+                guard granted else {
+                    self.callbackChannel?.invokeMethod("didHasError", arguments: "Recording permission not found, please allow permission first and then try again")
                     return
                 }
-                do{
-                    try self?.audioEngine.start()
-                }catch{
-                    self?.callbackChannel?.invokeMethod("didHasError", arguments: "Can't start the audio engine")
+                do {
+                    // Now that permission is granted and session is active,
+                    // inputNode will report the real format with channels > 0
+                    let inputNode = self.audioEngine.inputNode
+                    let recordingFormat = inputNode.outputFormat(forBus: 0)
+                    guard recordingFormat.channelCount > 0 else {
+                        self.callbackChannel?.invokeMethod("didHasError", arguments: "Audio input has 0 channels.")
+                        return
+                    }
+
+                    inputNode.installTap(onBus: 0, bufferSize: 8192, format: recordingFormat) { buffer, audioTime in
+                        self.addAudio(buffer: buffer, audioTime: audioTime)
+                    }
+
+                    // Mute the implicit graph (inputNode→mainMixer→outputNode)
+                    // that AVAudioEngine creates when accessing inputNode.
+                    // mainMixerNode.outputVolume = 0 prevents any mic audio from
+                    // reaching the speakers. Combined with .record category, this
+                    // ensures zero audio output.
+                    self.audioEngine.mainMixerNode.outputVolume = 0
+
+                    self.audioEngine.prepare()
+                    try self.audioEngine.start()
+
+                    // Double-check mute after start (some iOS versions reset volume)
+                    self.audioEngine.mainMixerNode.outputVolume = 0
+                    self.callbackChannel?.invokeMethod("detectStateChanged", arguments: 1)
+                } catch {
+                    self.callbackChannel?.invokeMethod("didHasError", arguments: error.localizedDescription)
                 }
             }
         }
@@ -117,9 +123,14 @@ extension SwiftFlutterShazamKitPlugin{
     
     func stopListening() {
         callbackChannel?.invokeMethod("detectStateChanged", arguments: 0)
-        // Check if the audio engine is already recording.
-        mixerNode.removeTap(onBus: 0)
+        audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
+
+        // Restore audio session so other app audio works normally
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
+            try AVAudioSession.sharedInstance().setActive(true, options: [])
+        } catch {}
     }
 }
 
