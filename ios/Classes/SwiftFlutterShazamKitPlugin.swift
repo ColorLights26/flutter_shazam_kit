@@ -7,6 +7,7 @@ public class SwiftFlutterShazamKitPlugin: NSObject, FlutterPlugin {
     private let audioEngine = AVAudioEngine()
     private let mixerNode = AVAudioMixerNode()
     private var callbackChannel: FlutterMethodChannel?
+    private var isStarting = false
     
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "flutter_shazam_kit", binaryMessenger: registrar.messenger())
@@ -63,6 +64,11 @@ extension SwiftFlutterShazamKitPlugin{
             result(nil)
             return
         }
+        guard !isStarting else {
+            result(nil)
+            return
+        }
+        isStarting = true
 
         let audioSession = AVAudioSession.sharedInstance()
 
@@ -73,6 +79,7 @@ extension SwiftFlutterShazamKitPlugin{
             try audioSession.setCategory(.playAndRecord, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
             try audioSession.setActive(true, options: [])
         } catch {
+            isStarting = false
             callbackChannel?.invokeMethod("didHasError", arguments: error.localizedDescription)
             result(nil)
             return
@@ -82,6 +89,7 @@ extension SwiftFlutterShazamKitPlugin{
         audioSession.requestRecordPermission { [weak self] granted in
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                defer { self.isStarting = false }
                 guard granted else {
                     self.callbackChannel?.invokeMethod("didHasError", arguments: "Recording permission not found, please allow permission first and then try again")
                     return
@@ -95,6 +103,9 @@ extension SwiftFlutterShazamKitPlugin{
                         self.callbackChannel?.invokeMethod("didHasError", arguments: "Audio input has 0 channels.")
                         return
                     }
+
+                    // Remove any existing tap to prevent crash on double-start
+                    inputNode.removeTap(onBus: 0)
 
                     inputNode.installTap(onBus: 0, bufferSize: 8192, format: recordingFormat) { buffer, audioTime in
                         self.addAudio(buffer: buffer, audioTime: audioTime)
@@ -122,6 +133,7 @@ extension SwiftFlutterShazamKitPlugin{
     }
     
     func stopListening() {
+        isStarting = false
         callbackChannel?.invokeMethod("detectStateChanged", arguments: 0)
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
